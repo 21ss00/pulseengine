@@ -81,3 +81,42 @@ export function ToastStack({
     </div>
   );
 }
+
+export type ViewId = "markets" | "world";
+
+const VIEWS: { id: ViewId; label: string }[] = [
+  { id: "markets", label: "Markets" },
+  { id: "world", label: "World" },
+];
+
+export function ViewTabs({
+  value,
+  onChange,
+}: {
+  value: ViewId;
+  onChange: (next: ViewId) => void;
+}) {
+  return (
+    <div className="win-well flex items-stretch" role="tablist" aria-label="Dashboard view">
+      {VIEWS.map((view) => {
+        const active = view.id === value;
+        return (
+          <button
+            key={view.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(view.id)}
+            className={`px-4 py-1.5 font-display text-[11px] font-bold uppercase tracking-[0.2em] transition-colors ${
+              active
+                ? "bg-fuchsia-600 text-white shadow-[inset_1px_1px_0_rgba(255,255,255,0.4),inset_-1px_-1px_0_rgba(0,0,0,0.6)]"
+                : "text-dim hover:bg-violet-950 hover:text-ink"
+            }`}
+          >
+            {view.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

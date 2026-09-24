@@ -11,6 +11,8 @@ export const COINBASE_PRODUCT_IDS = [
   "XRP-USD",
   "DOGE-USD",
   "LTC-USD",
+  "PAXG-USD",
+  "LINK-USD",
 ];
 
 interface CoinbaseTickerMessage {
@@ -86,13 +88,20 @@ function toAlphaEnvelope(
  * Live Stream Alpha source backed by Coinbase's public ticker channel.
  * Reconnects automatically after any socket failure or close.
  */
+export interface FeedConnectionStatus {
+  ok: boolean;
+  detail: string;
+}
+
 export function createCoinbaseAlphaFeed(
-  nextId: () => number
+  nextId: () => number,
+  onStatus?: (status: FeedConnectionStatus) => void
 ): Observable<AlphaEnvelope> {
   return new Observable<AlphaEnvelope>((subscriber) => {
     const socket = new WebSocket(COINBASE_FEED_URL);
 
     socket.onopen = () => {
+      onStatus?.({ ok: true, detail: `subscribed to ${COINBASE_PRODUCT_IDS.length} products` });
       socket.send(
         JSON.stringify({
           type: "subscribe",
@@ -115,10 +124,12 @@ export function createCoinbaseAlphaFeed(
     };
 
     socket.onerror = () => {
+      onStatus?.({ ok: false, detail: "connection failed, retrying" });
       subscriber.error(new Error("Coinbase feed connection failed."));
     };
 
     socket.onclose = () => {
+      onStatus?.({ ok: false, detail: "connection closed, retrying" });
       subscriber.error(new Error("Coinbase feed connection closed."));
     };
 

@@ -159,7 +159,7 @@ export type AdviceSeverity = "info" | "watch" | "warning" | "critical";
 export interface AdviceItem {
   id: string;
   severity: AdviceSeverity;
-  stream: "alpha" | "beta" | "gamma" | "cross" | "system";
+  stream: "alpha" | "beta" | "gamma" | "cross" | "system" | "world";
   headline: string;
   detail: string;
 }

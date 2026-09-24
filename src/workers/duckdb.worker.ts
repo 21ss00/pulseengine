@@ -4,11 +4,14 @@ import {
   BETA_TABLE_NAME,
   GAMMA_TABLE_NAME,
   SCHEMA_STATEMENTS,
+  EXPORTABLE_TABLES,
   TELEMETRY_TABLES,
   buildAlphaInsertSql,
   buildBetaInsertSql,
   buildGammaInsertSql,
-  type TelemetryTableName,
+  buildWorldBatchInsertSql,
+  buildWorldEvictionSql,
+  type ExportableTable,
 } from "@/analytics/schema";
 import {
   GAMMA_FIT_WINDOW_MS,
@@ -29,6 +32,7 @@ import type {
   QueryContext,
   TrendRow,
 } from "@/types/analytics";
+import type { WorldBatch } from "@/types/world";
 import type {
   StreamAlphaTick,
   StreamBetaSentiment,
@@ -60,6 +64,7 @@ export type DuckDBWorkerRequest =
       table: typeof GAMMA_TABLE_NAME;
       rows: StreamGammaDiagnostic[];
     }
+  | { type: "insertWorld"; requestId: string; batch: WorldBatch }
   | { type: "evict"; requestId: string; cutoffTimestampMs: number }
   | { type: "query"; requestId: string; sql: string }
   | { type: "forecast"; requestId: string; nowMs: number }
@@ -67,7 +72,7 @@ export type DuckDBWorkerRequest =
   | {
       type: "export";
       requestId: string;
-      table: TelemetryTableName;
+      table: ExportableTable;
       format: "csv" | "parquet";
     };
 
@@ -252,6 +257,14 @@ async function handleInsertBatch(
   return request.rows.length;
 }
 
+async function handleInsertWorld(batch: WorldBatch): Promise<number> {
+  const conn = requireConnection();
+  for (const statement of buildWorldBatchInsertSql(batch)) {
+    await conn.query(statement);
+  }
+  return batch.metrics.length + batch.headlines.length + batch.events.length;
+}
+
 async function handleEvict(cutoffTimestampMs: number): Promise<number> {
   const conn = requireConnection();
 
@@ -273,6 +286,9 @@ async function handleEvict(cutoffTimestampMs: number): Promise<number> {
       await deleteStatement.close();
       totalDeleted += staleCount;
     }
+  }
+  for (const statement of buildWorldEvictionSql(Date.now())) {
+    await conn.query(statement);
   }
   return totalDeleted;
 }
@@ -332,11 +348,11 @@ async function handleUserQuery(sqlText: string): Promise<{
 }
 
 async function handleExport(
-  table: TelemetryTableName,
+  table: ExportableTable,
   format: "csv" | "parquet"
 ): Promise<{ fileName: string; mimeType: string; data: Uint8Array }> {
   const conn = requireConnection();
-  if (!database || !TELEMETRY_TABLES.includes(table)) {
+  if (!database || !EXPORTABLE_TABLES.includes(table)) {
     throw new Error(`Unknown table: ${table}`);
   }
 
@@ -367,6 +383,15 @@ workerContext.onmessage = async (event: MessageEvent<DuckDBWorkerRequest>) => {
       }
       case "insertBatch": {
         const rowsInserted = await handleInsertBatch(request);
+        workerContext.postMessage({
+          type: "insertComplete",
+          requestId: request.requestId,
+          rowsInserted,
+        });
+        break;
+      }
+      case "insertWorld": {
+        const rowsInserted = await handleInsertWorld(request.batch);
         workerContext.postMessage({
           type: "insertComplete",
           requestId: request.requestId,

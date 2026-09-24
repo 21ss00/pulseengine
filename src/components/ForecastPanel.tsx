@@ -21,9 +21,10 @@ const STREAM_LABEL: Record<AdviceItem["stream"], string> = {
   gamma: "iot",
   cross: "cross-stream",
   system: "system",
+  world: "world",
 };
 
-function AdviceList({ advice }: { advice: AdviceItem[] }) {
+export function AdviceList({ advice }: { advice: AdviceItem[] }) {
   return (
     <ul
       className="max-h-[34rem] space-y-2.5 overflow-y-auto pr-1"

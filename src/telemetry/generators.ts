@@ -45,6 +45,8 @@ export const COINBASE_BETA_TOPICS = [
   "$XRP",
   "$DOGE",
   "$LTC",
+  "$PAXG",
+  "$LINK",
   "MarketOutlook",
   "RegulationNews",
 ];

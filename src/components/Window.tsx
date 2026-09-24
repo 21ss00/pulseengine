@@ -156,3 +156,19 @@ export function StatusIndicator({ status }: { status: string }) {
     </div>
   );
 }
+
+/** Marks whether a panel shows real-world data or locally generated demo data. */
+export function DataBadge({ live, label }: { live: boolean; label?: string }) {
+  return (
+    <span
+      className={`border px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-[0.18em] ${
+        live
+          ? "border-lime-400/60 bg-lime-950/60 text-lime-300"
+          : "border-amber-400/60 bg-amber-950/60 text-amber-300"
+      }`}
+      title={live ? "Real data from a public API" : "Generated locally for demonstration"}
+    >
+      {label ?? (live ? "Live" : "Sim")}
+    </span>
+  );
+}

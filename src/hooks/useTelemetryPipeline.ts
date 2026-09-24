@@ -7,7 +7,7 @@ import {
   ALPHA_TABLE_NAME,
   BETA_TABLE_NAME,
   GAMMA_TABLE_NAME,
-  type TelemetryTableName,
+  type ExportableTable,
 } from "@/analytics/schema";
 import { RETENTION_WINDOW_MS, type ForecastSnapshot } from "@/types/analytics";
 import type {
@@ -18,6 +18,9 @@ import type {
   TelemetryIngestCounters,
 } from "@/types/telemetry";
 import { createCoinbaseAlphaFeed } from "@/hooks/coinbaseFeed";
+import { createMastodonBetaFeed } from "@/hooks/mastodonFeed";
+import { ALPHA_FEED, BETA_FEED, type FeedStatus } from "@/config/feeds";
+import type { WorldBatch } from "@/types/world";
 import {
   COINBASE_BETA_TOPICS,
   createTelemetryGenerators,
@@ -66,8 +69,10 @@ export interface UseTelemetryPipelineResult {
   query: <TRow = Record<string, unknown>>(sql: string) => Promise<TRow[]>;
   forecast: () => Promise<ForecastSnapshot>;
   runUserQuery: (sql: string) => Promise<UserQueryResult>;
+  feeds: FeedStatus[];
+  insertWorld: (batch: WorldBatch) => Promise<void>;
   exportTable: (
-    table: TelemetryTableName,
+    table: ExportableTable,
     format: "csv" | "parquet"
   ) => Promise<ExportedFile>;
 }
@@ -86,6 +91,33 @@ type ResponseOf<T extends DuckDBWorkerResponse["type"]> = Extract<
   { type: T }
 >;
 
+const initialFeeds: Record<string, FeedStatus> = {
+  alpha: {
+    id: "alpha",
+    label: ALPHA_FEED === "coinbase" ? "Market ticks (Coinbase WebSocket)" : "Market ticks (simulated)",
+    live: ALPHA_FEED === "coinbase",
+    state: ALPHA_FEED === "coinbase" ? "connecting" : "simulated",
+    detail: null,
+    updatedAt: null,
+  },
+  beta: {
+    id: "beta",
+    label: BETA_FEED === "mastodon" ? "Social posts (Mastodon hashtags)" : "Social posts (simulated)",
+    live: BETA_FEED === "mastodon",
+    state: BETA_FEED === "mastodon" ? "connecting" : "simulated",
+    detail: null,
+    updatedAt: null,
+  },
+  gamma: {
+    id: "gamma",
+    label: "IoT diagnostics (simulated)",
+    live: false,
+    state: "simulated",
+    detail: "no public real-world source; generated locally",
+    updatedAt: null,
+  },
+};
+
 const initialState: TelemetryPipelineState = {
   status: "initializing",
   errorMessage: null,
@@ -96,6 +128,7 @@ const initialState: TelemetryPipelineState = {
 
 export function useTelemetryPipeline(): UseTelemetryPipelineResult {
   const [state, setState] = useState<TelemetryPipelineState>(initialState);
+  const [feeds, setFeeds] = useState<Record<string, FeedStatus>>(initialFeeds);
   const sendRequestRef = useRef<
     ((request: DuckDBWorkerRequest) => Promise<DuckDBWorkerResponse>) | null
   >(null);
@@ -160,17 +193,30 @@ export function useTelemetryPipeline(): UseTelemetryPipelineResult {
         if (disposed) return;
         setState((prev) => ({ ...prev, status: "streaming" }));
 
-        const liveAlpha = process.env.NEXT_PUBLIC_ALPHA_FEED === "coinbase";
+        const liveAlpha = ALPHA_FEED === "coinbase";
+        const liveBeta = BETA_FEED === "mastodon";
         const generators = createTelemetryGenerators({
           betaTopics: liveAlpha ? COINBASE_BETA_TOPICS : undefined,
         });
+        const reportFeed = (id: string, status: { ok: boolean; detail: string }) => {
+          if (disposed) return;
+          setFeeds((prev) => ({
+            ...prev,
+            [id]: {
+              ...prev[id],
+              state: status.ok ? "ok" : "error",
+              detail: status.detail,
+              updatedAt: Date.now(),
+            },
+          }));
+        };
 
         const alpha$ = liveAlpha
-          ? createCoinbaseAlphaFeed(generators.nextId)
+          ? createCoinbaseAlphaFeed(generators.nextId, (status) => reportFeed("alpha", status))
           : interval(ALPHA_TICK_INTERVAL_MS).pipe(map(() => generators.alpha()));
-        const beta$ = interval(BETA_SAMPLE_INTERVAL_MS).pipe(
-          map(() => generators.beta())
-        );
+        const beta$ = liveBeta
+          ? createMastodonBetaFeed(generators.nextId, (status) => reportFeed("beta", status))
+          : interval(BETA_SAMPLE_INTERVAL_MS).pipe(map(() => generators.beta()));
         const gamma$ = interval(GAMMA_SAMPLE_INTERVAL_MS).pipe(
           map(() => generators.gamma())
         );
@@ -312,7 +358,7 @@ export function useTelemetryPipeline(): UseTelemetryPipelineResult {
 
   const exportTable = useCallback(
     async (
-      table: TelemetryTableName,
+      table: ExportableTable,
       format: "csv" | "parquet"
     ): Promise<ExportedFile> => {
       const { fileName, mimeType, data } = await call(
@@ -324,5 +370,20 @@ export function useTelemetryPipeline(): UseTelemetryPipelineResult {
     [call]
   );
 
-  return { state, query, forecast, runUserQuery, exportTable };
+  const insertWorld = useCallback(
+    async (batch: WorldBatch): Promise<void> => {
+      await call({ type: "insertWorld", batch }, "insertComplete");
+    },
+    [call]
+  );
+
+  return {
+    state,
+    query,
+    forecast,
+    runUserQuery,
+    exportTable,
+    feeds: Object.values(feeds),
+    insertWorld,
+  };
 }

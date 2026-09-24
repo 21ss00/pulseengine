@@ -17,6 +17,9 @@ import {
 import { useTelemetryPipeline } from "@/hooks/useTelemetryPipeline";
 import { useEChart } from "@/hooks/useEChart";
 import { useForecast } from "@/hooks/useForecast";
+import { useWorldData } from "@/hooks/useWorldData";
+import { useWorldFeeds } from "@/hooks/useWorldFeeds";
+import { ALPHA_FEED, WORLD_ENABLED } from "@/config/feeds";
 import { buildAdvice } from "@/analytics/advisor";
 import { evaluateAlerts, trendTag } from "@/analytics/alerts";
 import {
@@ -37,7 +40,14 @@ import {
   type ThresholdAlert,
 } from "@/types/analytics";
 import { KpiTile, Readout, StatusIndicator, Window } from "@/components/Window";
-import { TimeRangeSelector, ToastStack, type Toast } from "@/components/Controls";
+import {
+  TimeRangeSelector,
+  ToastStack,
+  ViewTabs,
+  type Toast,
+  type ViewId,
+} from "@/components/Controls";
+import WorldView from "@/components/world/WorldView";
 import ConsoleModal from "@/components/ConsoleModal";
 import ForecastPanel from "@/components/ForecastPanel";
 import {
@@ -53,10 +63,11 @@ import {
 const TOAST_LIFETIME_MS = 8000;
 const ALERT_TOAST_COOLDOWN_MS = 30_000;
 const MAX_TOASTS = 3;
-const LIVE_FEED = process.env.NEXT_PUBLIC_ALPHA_FEED === "coinbase";
+const LIVE_FEED = ALPHA_FEED === "coinbase";
 
 export default function Dashboard() {
-  const { state, query, forecast, runUserQuery, exportTable } = useTelemetryPipeline();
+  const { state, query, forecast, runUserQuery, exportTable, feeds, insertWorld } =
+    useTelemetryPipeline();
 
   const [rangeId, setRangeId] = useState<RangeId>("live");
   const range = RANGES.find((item) => item.id === rangeId) ?? RANGES[0];
@@ -64,8 +75,13 @@ export default function Dashboard() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [zoomLocked, setZoomLocked] = useState(false);
+  const [sentimentEmpty, setSentimentEmpty] = useState(false);
+  const [view, setView] = useState<ViewId>("markets");
+  const [worldVisited, setWorldVisited] = useState(false);
 
   const streaming = state.status === "streaming";
+  const worldSources = useWorldFeeds(streaming && WORLD_ENABLED, insertWorld);
+  const world = useWorldData(streaming && WORLD_ENABLED, query);
   const snapshot = useForecast(streaming, forecast);
   const advice = useMemo(() => buildAdvice(snapshot), [snapshot]);
   const alerts = useMemo(() => evaluateAlerts(kpis), [kpis]);
@@ -192,6 +208,7 @@ export default function Dashboard() {
           }
 
           sentimentChartRef.current?.setOption(buildSentimentOption(sentimentRows));
+          setSentimentEmpty(sentimentRows.length === 0);
           diagnosticsChartRef.current?.setOption(buildDiagnosticsOption(diagnosticsRows));
           statusChartRef.current?.setOption(buildStatusOption(statusRows));
 
@@ -258,7 +275,16 @@ export default function Dashboard() {
                 <span className="truncate">{state.errorMessage}</span>
               </div>
             ) : null}
-            <TimeRangeSelector value={rangeId} onChange={setRangeId} />
+            {WORLD_ENABLED ? (
+              <ViewTabs
+                value={view}
+                onChange={(next) => {
+                  setView(next);
+                  if (next === "world") setWorldVisited(true);
+                }}
+              />
+            ) : null}
+            {view === "markets" ? <TimeRangeSelector value={rangeId} onChange={setRangeId} /> : null}
             <button
               type="button"
               onClick={() => setConsoleOpen(true)}
@@ -268,6 +294,9 @@ export default function Dashboard() {
               <Terminal className="h-3.5 w-3.5 text-neon" />
               Console
             </button>
+            {WORLD_ENABLED && world.index.components.length > 0 ? (
+              <Readout label="World" value={`${world.index.score} ${world.index.label}`} testId="world-mood" />
+            ) : null}
             <Readout label="Rows" value={totalIngested.toLocaleString()} />
             <Readout
               label="Evicted"
@@ -282,6 +311,7 @@ export default function Dashboard() {
           </div>
         </header>
 
+        <div className={view === "markets" ? "" : "hidden"}>
         <section className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-6">
           <KpiTile
             icon={<TrendingUp className="h-5 w-5" />}
@@ -373,7 +403,14 @@ export default function Dashboard() {
               </>
             }
           >
-            <div ref={sentimentContainerRef} className="h-72 w-full" />
+            <div className="relative">
+              <div ref={sentimentContainerRef} className="h-72 w-full" />
+              {sentimentEmpty ? (
+                <p className="pointer-events-none absolute inset-x-6 top-1/2 -translate-y-1/2 text-center text-[11px] leading-relaxed text-dim" data-testid="sentiment-empty">
+                  No social posts in this window yet. Real posts are sparse, so try the 5m or 15m range.
+                </p>
+              ) : null}
+            </div>
           </Window>
 
           <Window
@@ -409,6 +446,13 @@ export default function Dashboard() {
             <ForecastPanel snapshot={snapshot} advice={advice} liveFeed={LIVE_FEED} />
           </div>
         </section>
+        </div>
+
+        {WORLD_ENABLED && worldVisited ? (
+          <div className={view === "world" ? "" : "hidden"}>
+            <WorldView data={world} sources={worldSources} feeds={feeds} />
+          </div>
+        ) : null}
       </div>
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />

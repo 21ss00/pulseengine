@@ -1,16 +1,14 @@
-# PulseEngine
+# PulseEngine World
 
-A browser-native, real-time financial and sentiment telemetry dashboard. Three
-telemetry streams are batched with RxJS, appended to an in-memory DuckDB-Wasm
-database running in a Web Worker, and queried live to drive Apache ECharts
-panels. All analytics, including the forecasting models, are DuckDB SQL running
-in the worker. There is no backend.
+PulseEngine with a real-world data layer. It is a copy of the original
+PulseEngine dashboard (candlesticks, DuckDB-Wasm analytics, forecasting, SQL
+console) that now also pulls live public data: currencies, gold and other
+metals, politics (prediction markets), news, social posts, earthquakes and
+other hazards, space weather, weather, air quality and macro indicators.
 
-| Stream | Content | Source |
-| --- | --- | --- |
-| Alpha | Market ticks with order-book sizes | Synthetic random walk (default) or live Coinbase feed |
-| Beta | Social sentiment, post volume, influencer reach | Synthetic |
-| Gamma | IoT diagnostics for 12 devices | Synthetic |
+Everything runs in the browser. There is no backend and no API key: the page
+calls each public API directly, writes the results into an in-memory DuckDB
+database in a Web Worker, and every panel is a SQL query over those tables.
 
 ## Run it
 
@@ -19,100 +17,106 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. `npm install`, `npm run dev` and `npm run build`
-copy the DuckDB-Wasm binaries from `node_modules` into `public/duckdb/`
-(gitignored), so the app has no CDN dependency and works offline.
+Open http://localhost:3000. Use the **MARKETS / WORLD** switch in the header.
+The first load needs internet access; the DuckDB binaries themselves are served
+locally.
 
 ```bash
-npm test       # SQL, advisor, alert and guard tests against a real DuckDB
+npm test     # 53 tests: parsers, SQL, scheduler, advisor, index (uses captured real responses)
 npm run lint
 npm run build
 ```
 
-## What is on screen
+## What is live and what is simulated
 
-- **Market feed:** OHLC candlesticks with stacked volume, 10s/60s SMAs, 20s
-  Bollinger bands and a 60s regression trend line. The indicators attach to the
-  first visible symbol. Click legend entries to show or hide symbols and
-  overlays; the mouse wheel or bottom slider zooms. Zooming locks the chart on
-  that window (candles that are unusually volatile are shaded) until you press
-  "Zoom locked - reset".
-- **Time range:** `1m`, `5m`, `15m` and `Live` re-window every query and chart.
-  Candle width scales with the range (1s, 2s, 10s, 30s).
-- **KPI cards:** each shows a change tag against the previous window
-  (e.g. `+2.4% ▲`). Sentiment change is shown in points because it hovers
-  around zero.
-- **Threshold alerts:** a pulsing ring and a toast fire when any topic's
-  15-second sentiment drops below -0.5 or any device exceeds 85°C.
-- **Device status:** number of devices currently nominal, warning, throttled or
-  offline (latest reading per device).
-- **Console:** export a table from the live buffer as CSV or Parquet, or run
-  read-only SQL (one statement; `SELECT`, `WITH`, `FROM`, `VALUES`, `DESCRIBE`,
-  `SHOW`, `EXPLAIN`, `SUMMARIZE`; 500 rows displayed). The guard runs inside
-  the worker, not only in the UI.
+Every panel carries a badge: `LIVE` for real data, `SIM` for locally generated.
 
-## Predictions, analysis and advice
+| Stream / panel | Source | Default |
+| --- | --- | --- |
+| Market ticks (candles, indicators, forecasts) | Coinbase WebSocket: BTC, ETH, SOL, XRP, DOGE, LTC, LINK and **PAXG** (gold token) | live |
+| Social posts (Beta stream) | Mastodon public hashtag timelines, 12 topics | live |
+| IoT diagnostics (Gamma stream) | no public source exists | **simulated** |
+| Currencies | Frankfurter (ECB reference rates), 12 pairs plus a USD index using the ICE formula, 90 days of history | live |
+| Metals | gold-api.com spot: gold, silver, platinum, palladium, copper; gold history from the PAXG token | live |
+| Politics | Polymarket and Kalshi prediction markets (politics, elections, world, economics) | live |
+| News | BBC (world, politics, business), The Guardian, NPR, Al Jazeera via rss2json; Hacker News; Wikipedia's most-read articles | live |
+| Planet | USGS earthquakes, NASA EONET storms, fires and volcanoes, NOAA Kp index, ISS position | live |
+| Weather and air quality | Open-Meteo, 10 cities | live |
+| Macro | Crypto Fear & Greed, US Treasury average rates, World Bank GDP, inflation and unemployment, CoinGecko, mempool.space | live |
 
-The forecasting panel refreshes every second from one worker request that runs
-these queries over the in-memory buffer:
-
-- **Trend lines:** `REGR_SLOPE`, `REGR_INTERCEPT` and `REGR_R2` per symbol over
-  60s, giving a slope in %/min and a 30s projection.
-- **Alpha signals:** order-book imbalance `(bid - ask) / (bid + ask)` over 10s,
-  Bollinger z-score, and 10s/60s SMA crossovers from time-based window
-  functions.
-- **Beta signals:** post velocity (posts/s) against a 60s baseline, follower-
-  weighted sentiment and an influencer impact score.
-- **Gamma forecasts:** memory leak rate (%/min, linear fit) with time to
-  exhaustion, and an exponential thermal fit (`REGR_SLOPE(ln(temp), t)`) with
-  time to reach the 85°C throttle point.
-- **Correlation matrix:** 5s sentiment change against the forward price return
-  at 10s, 30s and 60s lags, and 5s social-volume change against |return|. A
-  cell is marked `*` only if it clears |r| >= 0.3 and roughly a 99% bar for its
-  sample size, so a lone noisy value is not reported as a leading indicator.
-- **Advice:** plain-text rules over those results, ranked by severity.
-
-These are statistical signals, not financial advice. In synthetic mode the
-price responds to sentiment with a planted 20s lag so the detectors have
-something to find; real markets will not behave that way.
-
-## Live market data
-
-Stream Alpha can read real ticks from Coinbase's public ticker WebSocket (no API
-key). Create `.env.local` and restart the dev server:
+Set any of these in `.env.local` to change the defaults:
 
 ```
-NEXT_PUBLIC_ALPHA_FEED=coinbase
+NEXT_PUBLIC_ALPHA_FEED=synthetic   # coinbase (default) | synthetic
+NEXT_PUBLIC_BETA_FEED=synthetic    # mastodon (default) | synthetic
+NEXT_PUBLIC_WORLD=off              # on (default) | off, hides the World view and skips its requests
 ```
 
-Leave it unset for synthetic data. The live feed tracks BTC, ETH, SOL, XRP, DOGE
-and LTC against USD and reconnects automatically. Sentiment and IoT data stay
-synthetic.
+## The World view
+
+- **World pulse:** a 0-100 mood index from crypto fear and greed, gold's move,
+  dollar strength, Bitcoin momentum, news tone, social tone and physical
+  hazards. Missing components are skipped and the weights renormalised. It is a
+  transparent heuristic, not an official index, and every component is shown.
+- **Observations:** plain-text notes from the data: sharp gold or dollar moves,
+  a flight to safety (gold up while Bitcoin falls), large prediction-market
+  repricings (only liquid markets), an inverted Treasury curve, strong quakes,
+  geomagnetic storms, unhealthy air, and the strongest asset correlations.
+- **Currencies, metals, politics, news, social, planet, weather, macro:**
+  sparklines, 1-day and multi-day changes, probability bars, tone chips, a
+  hazard map with the ISS track, and a country scoreboard.
+- **Cross-asset correlation:** daily-return correlations between Bitcoin,
+  Ethereum, gold, the USD index and major currencies over 60 days, computed with
+  DuckDB `corr` after aligning weekend crypto candles to weekday FX.
+- **Data sources:** live status of every feed, with row counts, last update and
+  automatic backoff for failures.
+
+The console can query and export the new tables: `world_metrics`,
+`world_headlines` and `world_events`.
 
 ## How it works
 
-- `src/types/` - stream and analytics types, range definitions, retention.
-- `src/analytics/` - `schema.ts` (tables, insert SQL), `sql.ts` (every chart,
-  KPI and forecasting query), `sqlGuard.ts`, `advisor.ts`, `alerts.ts`. These
-  have no runtime imports so the tests run them directly under Node.
-- `src/telemetry/generators.ts` - synthetic streams, with an injectable clock and
-  RNG for tests.
-- `src/hooks/useTelemetryPipeline.ts` - generates traffic, batches it with
-  `bufferTime(16)`, inserts each batch into DuckDB, and every 5 seconds deletes
-  rows older than `RETENTION_WINDOW_MS`.
-- `src/workers/duckdb.worker.ts` - owns the DuckDB-Wasm instance and serves
-  insert, evict, query, forecast, user-query and export requests over
-  `postMessage`.
-- `src/components/` - `Dashboard.tsx` (polling loop and layout), chart option
-  builders, the console modal and the forecasting panel.
+- `src/world/` - `parsers*.ts` turn each API's real response shape into rows
+  (pure functions), `sources.ts` lists every source with its URL and interval,
+  `scheduler.ts` runs them with non-overlapping polls, exponential backoff and
+  per-source health, `tone.ts` is the word-list tone scorer.
+- `src/analytics/world*.ts` - the SQL for latest values, sparklines, the
+  summary, cross-asset correlation and social topics; the mood index; the
+  advisor rules.
+- `src/analytics/schema.ts` - the three world tables use primary keys and
+  `ON CONFLICT DO NOTHING`, so repeated polls never duplicate rows. Slow macro
+  series are never evicted; fast series and transient events are.
+- `src/hooks/mastodonFeed.ts` - Mastodon posts become Beta-stream rows, using the
+  author's follower count as reach.
+- `src/components/world/` - the World view.
 
-Retention is 15 minutes so the widest range (`15m`) has data to show. Change
-`RETENTION_WINDOW_MS` in `src/types/analytics.ts` to trade memory for history.
+## Limits and honest notes
 
-## Browser support
+- **Tone is a word list.** Headline and post tone come from a small lexicon with
+  negation handling. It is a rough gauge, not sentiment analysis.
+- **Prediction markets are not polls.** They show what traders will pay, and thin
+  markets can move on one trade, so the advisor ignores low-volume ones.
+- **Oil and GDELT are missing.** No free oil price is reachable from a browser,
+  and GDELT blocks browser requests.
+- **News passes through rss2json**, a third-party gateway that turns RSS into
+  JSON. It sees which feeds you request. Every other source is called directly,
+  which means those services see your IP address like any website would.
+- **Traffic.** Kalshi responses are 1-3 MB and are polled every 10 minutes;
+  spot metals poll every minute. Nothing polls faster than every 30 seconds
+  except the live WebSocket and Mastodon loops.
+- **Daily FX is daily.** ECB reference rates update once per working day; the
+  intraday dollar move is not available for free.
+- Not financial advice. Charts pause while the browser tab is hidden.
 
-DuckDB-Wasm runs in a worker started from inside the DuckDB worker, so the
-browser must support nested Web Workers. This is verified in Chromium only;
-Firefox and Safari are untested. If nested workers are unavailable the header
-shows an error explaining why. Charts pause while the tab is hidden, because
-they are driven by `requestAnimationFrame`.
+`scripts/capture-fixtures.mjs` re-fetches every API and refreshes the fixtures
+under `tests/fixtures/` if a provider changes its response format.
+
+## Everything from the original
+
+The market view, forecasting panel, alerts, time ranges, SQL console and export
+work as before; see the original project for the details. Retention for the
+streaming tables is 15 minutes (`RETENTION_WINDOW_MS` in
+`src/types/analytics.ts`).
+
+Browser support is verified in Chromium only: DuckDB-Wasm starts a worker from
+inside its own worker.

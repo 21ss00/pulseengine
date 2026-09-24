@@ -16,7 +16,8 @@ export type SentimentPlatform =
   | "reddit"
   | "stocktwits"
   | "news"
-  | "discord";
+  | "discord"
+  | "mastodon";
 
 export type DiagnosticRegion =
   | "us-east"

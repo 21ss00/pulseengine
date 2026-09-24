@@ -8,7 +8,10 @@ import {
   ALPHA_TABLE_NAME,
   BETA_TABLE_NAME,
   GAMMA_TABLE_NAME,
-  type TelemetryTableName,
+  WORLD_EVENTS_TABLE,
+  WORLD_HEADLINES_TABLE,
+  WORLD_METRICS_TABLE,
+  type ExportableTable,
 } from "@/analytics/schema";
 
 const PRESETS: { label: string; sql: string }[] = [
@@ -30,13 +33,20 @@ UNION ALL SELECT 'gamma_diagnostics', count(*), min(event_time), max(event_time)
     label: "Device states",
     sql: "SELECT device_id, arg_max(status, event_time) AS status, max(cpu_temperature_celsius) AS peak_temp, max(memory_utilization_percent) AS peak_mem FROM gamma_diagnostics GROUP BY device_id ORDER BY peak_temp DESC",
   },
+  {
+    label: "World series",
+    sql: "SELECT series_id, label, value, unit, source, event_time FROM world_metrics ORDER BY event_time DESC LIMIT 50",
+  },
   { label: "Schema", sql: "DESCRIBE alpha_ticks" },
 ];
 
-const TABLES: { id: TelemetryTableName; label: string }[] = [
+const TABLES: { id: ExportableTable; label: string }[] = [
   { id: ALPHA_TABLE_NAME, label: "alpha_ticks (market)" },
   { id: BETA_TABLE_NAME, label: "beta_sentiment (social)" },
   { id: GAMMA_TABLE_NAME, label: "gamma_diagnostics (iot)" },
+  { id: WORLD_METRICS_TABLE, label: "world_metrics (fx, metals, markets, macro...)" },
+  { id: WORLD_HEADLINES_TABLE, label: "world_headlines (news)" },
+  { id: WORLD_EVENTS_TABLE, label: "world_events (quakes, storms, fires)" },
 ];
 
 function formatCell(value: unknown): string {
@@ -67,7 +77,7 @@ export default function ConsoleModal({
   onClose: () => void;
   runUserQuery: (sql: string) => Promise<UserQueryResult>;
   exportTable: (
-    table: TelemetryTableName,
+    table: ExportableTable,
     format: "csv" | "parquet"
   ) => Promise<ExportedFile>;
 }) {
@@ -76,7 +86,7 @@ export default function ConsoleModal({
   const [result, setResult] = useState<UserQueryResult | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const [table, setTable] = useState<TelemetryTableName>(ALPHA_TABLE_NAME);
+  const [table, setTable] = useState<ExportableTable>(ALPHA_TABLE_NAME);
   const [format, setFormat] = useState<"csv" | "parquet">("csv");
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
