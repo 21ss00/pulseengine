@@ -123,7 +123,10 @@ async function instantiateDuckDB(): Promise<void> {
     );
   }
 
-  const assetBase = `${self.location.origin}/duckdb`;
+  // Inlined by Next.js at build time; matches next.config.ts's basePath so
+  // this still resolves correctly when served from a GitHub Pages subpath.
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  const assetBase = `${self.location.origin}${basePath}/duckdb`;
   const bundle = await duckdb.selectBundle({
     mvp: {
       mainModule: `${assetBase}/duckdb-mvp.wasm`,
